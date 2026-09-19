@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { storage } from "./storage.js";
-import { Plus, X, Star, Search, Trash2, Pencil, Quote, BookOpen, Library, Copy, Clock, Share2 } from "lucide-react";
+import { Plus, X, Star, Search, Trash2, Pencil, Quote, BookOpen, Library, Copy, Clock, Share2, Sparkles } from "lucide-react";
 
 const SPINE_COLORS = [
   { bg: "#0FA89C", text: "#EAFBF8" },
@@ -107,6 +107,17 @@ export default function LibraryApp() {
   const skipSaveRef = useRef(true);
   const [coverRecognizing, setCoverRecognizing] = useState(false);
   const coverInputRef = useRef(null);
+  const [dragBookId, setDragBookId] = useState(null);
+  const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
+  const [dragOverStatus, setDragOverStatus] = useState(null);
+  const dragRef = useRef(null); // { id, book, startX, startY, moved }
+  const dragOverStatusRef = useRef(null);
+  const [textAutofilling, setTextAutofilling] = useState(false);
+  const [reviewPolishing, setReviewPolishing] = useState(false);
+  const [recommendOpen, setRecommendOpen] = useState(false);
+  const [recommendLoading, setRecommendLoading] = useState(false);
+  const [recommendError, setRecommendError] = useState("");
+  const [recommendations, setRecommendations] = useState([]);
 
   useEffect(() => {
     (async () => {
@@ -124,6 +135,61 @@ export default function LibraryApp() {
     storage.set("library-books", JSON.stringify(books)).catch(() => {});
   }, [books]);
 
+  useEffect(() => {
+    function handleMove(e) {
+      const d = dragRef.current;
+      if (!d) return;
+      const dx = e.clientX - d.startX;
+      const dy = e.clientY - d.startY;
+      if (!d.moved && Math.hypot(dx, dy) > 10) {
+        d.moved = true;
+        setDragBookId(d.id);
+      }
+      if (d.moved) {
+        e.preventDefault();
+        setDragPos({ x: e.clientX, y: e.clientY });
+        const el = document.elementFromPoint(e.clientX, e.clientY);
+        const zone = el && el.closest ? el.closest("[data-shelf-status]") : null;
+        setDragOverStatus(zone ? zone.getAttribute("data-shelf-status") : null);
+      }
+    }
+    function handleUp() {
+      const d = dragRef.current;
+      if (!d) return;
+      if (d.moved) {
+        setBooks((bs) => {
+          const target = dragOverStatusRef.current;
+          if (!target || target === d.book.status) return bs;
+          return bs.map((b) => (b.id === d.id ? { ...b, status: target } : b));
+        });
+        if (dragOverStatusRef.current && dragOverStatusRef.current !== d.book.status) {
+          showToast(`"${d.book.title}"을(를) ${STATUS[dragOverStatusRef.current].label} 책장으로 옮겼어요`);
+        }
+      } else {
+        openDetail(d.book);
+      }
+      dragRef.current = null;
+      setDragBookId(null);
+      setDragOverStatus(null);
+    }
+    window.addEventListener("pointermove", handleMove, { passive: false });
+    window.addEventListener("pointerup", handleUp);
+    window.addEventListener("pointercancel", handleUp);
+    return () => {
+      window.removeEventListener("pointermove", handleMove);
+      window.removeEventListener("pointerup", handleUp);
+      window.removeEventListener("pointercancel", handleUp);
+    };
+  }, []);
+
+  useEffect(() => {
+    dragOverStatusRef.current = dragOverStatus;
+  }, [dragOverStatus]);
+
+  function startDrag(e, book) {
+    dragRef.current = { id: book.id, book, startX: e.clientX, startY: e.clientY, moved: false };
+  }
+
   function showToast(msg) {
     setToast(msg);
     setTimeout(() => setToast(""), 2200);
@@ -139,6 +205,8 @@ export default function LibraryApp() {
       showToast("책 정보를 수정했어요");
     } else {
       setBooks((bs) => [{ ...draft, id: uid(), dateAdded: Date.now() }, ...bs]);
+      setQuery("");
+      setStatusFilter("all");
       showToast("서재에 책을 꽂았어요");
     }
     setDraft(null);
@@ -198,6 +266,97 @@ export default function LibraryApp() {
     } finally {
       setCoverRecognizing(false);
       e.target.value = "";
+    }
+  }
+
+  async function handleAutofillText() {
+    if (!draft || !draft.title.trim()) {
+      showToast("책 제목을 먼저 입력해 주세요");
+      return;
+    }
+    setTextAutofilling(true);
+    try {
+      const response = await fetch("/.netlify/functions/autofill-text", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ title: draft.title, author: draft.author }),
+      });
+      const parsed = await response.json();
+      if (!response.ok) throw new Error(parsed.error || "autofill failed");
+      setDraft((d) => {
+        if (!d) return d;
+        return {
+          ...d,
+          author: parsed.author && parsed.author.trim() ? parsed.author.trim() : d.author,
+          authorBio: parsed.authorBio && parsed.authorBio.trim() ? parsed.authorBio.trim() : d.authorBio,
+          description: parsed.description && parsed.description.trim() ? parsed.description.trim() : d.description,
+          genre: parsed.genre && parsed.genre.trim() ? parsed.genre.trim() : d.genre,
+        };
+      });
+      showToast("제목/저자로 정보를 채웠어요");
+    } catch (err) {
+      showToast("자동 채우기에 실패했어요");
+    } finally {
+      setTextAutofilling(false);
+    }
+  }
+
+  async function handlePolishReview() {
+    if (!draft || !draft.review.trim()) {
+      showToast("다듬을 감상평을 먼저 입력해 주세요");
+      return;
+    }
+    setReviewPolishing(true);
+    try {
+      const response = await fetch("/.netlify/functions/polish-review", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ review: draft.review, title: draft.title }),
+      });
+      const parsed = await response.json();
+      if (!response.ok) throw new Error(parsed.error || "polish failed");
+      if (parsed.polished) {
+        setDraft((d) => (d ? { ...d, review: parsed.polished } : d));
+        showToast("감상평을 다듬었어요");
+      }
+    } catch (err) {
+      showToast("다듬기에 실패했어요");
+    } finally {
+      setReviewPolishing(false);
+    }
+  }
+
+  async function openRecommend() {
+    setRecommendOpen(true);
+    setRecommendError("");
+    if (books.length === 0) {
+      setRecommendError("추천을 받으려면 서재에 책이 있어야 해요.");
+      return;
+    }
+    setRecommendLoading(true);
+    setRecommendations([]);
+    try {
+      const response = await fetch("/.netlify/functions/recommend-books", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          books: books.map((b) => ({
+            title: b.title,
+            author: b.author,
+            genre: b.genre,
+            status: b.status,
+            rating: b.rating,
+            recommend: b.recommend,
+          })),
+        }),
+      });
+      const parsed = await response.json();
+      if (!response.ok) throw new Error(parsed.error || "recommend failed");
+      setRecommendations(Array.isArray(parsed.recommendations) ? parsed.recommendations : []);
+    } catch (err) {
+      setRecommendError("추천을 불러오지 못했어요. 잠시 후 다시 시도해 주세요.");
+    } finally {
+      setRecommendLoading(false);
     }
   }
 
@@ -338,9 +497,10 @@ export default function LibraryApp() {
   function Spine({ book }) {
     const c = spineColor(book.id);
     const h = spineHeight(book.id);
+    const isDragging = dragBookId === book.id;
     return (
-      <button
-        onClick={() => openDetail(book)}
+      <div
+        onPointerDown={(e) => startDrag(e, book)}
         title={`${book.title} · ${book.author}`}
         style={{
           alignSelf: "end",
@@ -349,13 +509,16 @@ export default function LibraryApp() {
           background: c.bg,
           border: "none",
           borderRadius: "3px 3px 2px 2px",
-          cursor: "pointer",
+          cursor: "grab",
+          touchAction: "none",
+          userSelect: "none",
           position: "relative",
           padding: "10px 4px 8px",
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
           justifyContent: "space-between",
+          opacity: isDragging ? 0.25 : 1,
           boxShadow: "inset 2px 0 0 rgba(255,255,255,0.08), inset -2px 0 0 rgba(0,0,0,0.25), 2px 3px 6px rgba(0,0,0,0.45), 0 0 16px rgba(45,212,199,0.12)",
           animation: "riseIn 0.5s ease backwards",
           animationDelay: (hashStr(book.id) % 6) * 0.04 + "s",
@@ -392,6 +555,7 @@ export default function LibraryApp() {
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
+            pointerEvents: "none",
           }}
         >
           {book.title}
@@ -406,16 +570,20 @@ export default function LibraryApp() {
             whiteSpace: "nowrap",
             overflow: "hidden",
             maxHeight: 34,
+            pointerEvents: "none",
           }}
         >
           {book.author}
         </div>
-      </button>
+      </div>
     );
   }
 
-  function Shelf({ label, list }) {
-    if (list.length === 0) return null;
+  function Shelf({ label, list, statusKey }) {
+    const isEmpty = list.length === 0;
+    const isDropTarget = !!statusKey;
+    const isHovered = isDropTarget && dragOverStatus === statusKey;
+    if (isEmpty && !(dragBookId && isDropTarget)) return null;
     return (
       <div style={{ marginBottom: 40 }}>
         <div
@@ -423,7 +591,7 @@ export default function LibraryApp() {
             fontFamily: "'Space Mono', monospace",
             fontSize: 11,
             letterSpacing: "0.12em",
-            color: "#8FD4CC",
+            color: isHovered ? STATUS[statusKey].color : "#8FD4CC",
             marginBottom: 14,
             paddingLeft: 2,
           }}
@@ -431,17 +599,41 @@ export default function LibraryApp() {
           {label} · {list.length}권
         </div>
         <div
+          data-shelf-status={isDropTarget ? statusKey : undefined}
           style={{
             display: "grid",
             gridTemplateColumns: "repeat(auto-fill, minmax(58px, 1fr))",
             columnGap: 8,
             rowGap: 22,
             gridAutoRows: 210,
-            background:
-              "repeating-linear-gradient(to bottom, transparent 0px, transparent 210px, #123B3A 210px, #1F5C58 214px, #123B3A 218px, transparent 222px, transparent 232px)",
+            minHeight: isEmpty ? 90 : undefined,
+            borderRadius: 10,
+            outline: isHovered ? `2px dashed ${STATUS[statusKey].color}` : "none",
+            outlineOffset: 4,
+            transition: "outline 0.1s ease",
+            background: isEmpty
+              ? "transparent"
+              : "repeating-linear-gradient(to bottom, transparent 0px, transparent 210px, #123B3A 210px, #1F5C58 214px, #123B3A 218px, transparent 222px, transparent 232px)",
             paddingBottom: 10,
           }}
         >
+          {isEmpty && dragBookId && isDropTarget && (
+            <div
+              style={{
+                gridColumn: "1 / -1",
+                border: "1px dashed #1B5C58",
+                borderRadius: 10,
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                color: isHovered ? STATUS[statusKey].color : "#8FD4CC",
+                fontSize: 12,
+                height: 90,
+              }}
+            >
+              여기에 놓아서 "{STATUS[statusKey].label}"로 옮기기
+            </div>
+          )}
           {list.map((b) => (
             <Spine key={b.id} book={b} />
           ))}
@@ -508,9 +700,14 @@ export default function LibraryApp() {
               나의 소중한 책, 읽어온 흔적들 ...
             </p>
           </div>
-          <button className="lib-btn" onClick={openAdd} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-            <Plus size={16} /> 책 추가
-          </button>
+          <div style={{ display: "flex", gap: 8 }}>
+            <button className="lib-btn-ghost" onClick={openRecommend} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <Sparkles size={15} /> AI 추천
+            </button>
+            <button className="lib-btn" onClick={openAdd} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+              <Plus size={16} /> 책 추가
+            </button>
+          </div>
         </div>
 
         {/* stats */}
@@ -593,9 +790,10 @@ export default function LibraryApp() {
           )
         ) : (
           <>
-            <Shelf label="읽는~중" list={activeBooks.filter((b) => b.status === "reading").sort((a, b) => b.dateAdded - a.dateAdded)} />
-            <Shelf label="읽었~어" list={activeBooks.filter((b) => b.status === "done").sort((a, b) => b.dateAdded - a.dateAdded)} />
-            <Shelf label="읽고~파" list={activeBooks.filter((b) => b.status === "want").sort((a, b) => b.dateAdded - a.dateAdded)} />
+            <Shelf label="전체" list={[...activeBooks].sort((a, b) => b.dateAdded - a.dateAdded)} />
+            <Shelf label="읽는~중" statusKey="reading" list={activeBooks.filter((b) => b.status === "reading").sort((a, b) => b.dateAdded - a.dateAdded)} />
+            <Shelf label="읽었~어" statusKey="done" list={activeBooks.filter((b) => b.status === "done").sort((a, b) => b.dateAdded - a.dateAdded)} />
+            <Shelf label="읽고~파" statusKey="want" list={activeBooks.filter((b) => b.status === "want").sort((a, b) => b.dateAdded - a.dateAdded)} />
           </>
         )}
       </div>
@@ -826,14 +1024,34 @@ export default function LibraryApp() {
                 </Field>
               </div>
             </div>
+            <button
+              type="button"
+              onClick={handleAutofillText}
+              disabled={textAutofilling}
+              className="lib-btn-ghost"
+              style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 14 }}
+            >
+              <Sparkles size={14} /> {textAutofilling ? "채우는 중..." : "제목/저자로 저자·도서 소개 자동 채우기"}
+            </button>
             <Field label="저자 소개">
               <textarea className="lib-input" rows={3} value={draft.authorBio} onChange={(e) => setDraft({ ...draft, authorBio: e.target.value })} placeholder="이 작가에 대한 간단한 소개" />
             </Field>
             <Field label="도서 소개">
               <textarea className="lib-input" rows={3} value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="이 책의 줄거리나 소개" />
             </Field>
-            <Field label="감상평">
-              <textarea className="lib-input" rows={4} value={draft.review} onChange={(e) => setDraft({ ...draft, review: e.target.value })} placeholder="이 책을 읽고 느낀 점을 자유롭게 적어보세요" />
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
+              <div style={{ fontSize: 12, color: "#8FD4CC" }}>감상평</div>
+              <button
+                type="button"
+                onClick={handlePolishReview}
+                disabled={reviewPolishing}
+                style={{ background: "none", border: "none", color: "#2DD4C7", cursor: "pointer", fontSize: 11.5, display: "flex", alignItems: "center", gap: 4 }}
+              >
+                <Sparkles size={12} /> {reviewPolishing ? "다듬는 중..." : "AI로 다듬기"}
+              </button>
+            </div>
+            <Field label="">
+              <textarea className="lib-input" rows={4} value={draft.review} onChange={(e) => setDraft({ ...draft, review: e.target.value })} placeholder="이 책을 읽고 느낀 점을 자유롭게 적어보세요" style={{ marginTop: -6 }} />
             </Field>
             <div style={{ display: "flex", gap: 10 }}>
               <div style={{ flex: 1 }}>
@@ -906,6 +1124,97 @@ export default function LibraryApp() {
           </div>
         </>
       )}
+
+      {/* Recommend modal */}
+      {recommendOpen && (
+        <>
+          <div onClick={() => setRecommendOpen(false)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 50, animation: "fadeIn 0.2s ease" }} />
+          <div
+            style={{
+              position: "fixed", top: "50%", left: "50%", transform: "translate(-50%, -50%)",
+              width: "min(480px, 92vw)", maxHeight: "80vh", overflowY: "auto",
+              background: "#0F4750", border: "1px solid #1B5C58",
+              borderRadius: 14, zIndex: 51, padding: 24, animation: "fadeIn 0.2s ease",
+              boxShadow: "0 12px 32px rgba(58,42,33,0.14)",
+            }}
+          >
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+              <h3 style={{ fontFamily: "'Gowun Batang', serif", fontSize: 19, margin: 0, display: "flex", alignItems: "center", gap: 8 }}>
+                <Sparkles size={17} /> 다음 읽을 책 추천
+              </h3>
+              <button onClick={() => setRecommendOpen(false)} style={{ background: "none", border: "none", color: "#8FD4CC", cursor: "pointer" }}>
+                <X size={18} />
+              </button>
+            </div>
+
+            {recommendLoading && (
+              <p style={{ fontSize: 13, color: "#8FD4CC", textAlign: "center", padding: "24px 0" }}>
+                내 서재 취향을 분석해서 책을 고르는 중이에요...
+              </p>
+            )}
+
+            {!recommendLoading && recommendError && (
+              <p style={{ fontSize: 13, color: "#FF6B5C", lineHeight: 1.6 }}>{recommendError}</p>
+            )}
+
+            {!recommendLoading && !recommendError && recommendations.length > 0 && (
+              <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                {recommendations.map((r, i) => (
+                  <div key={i} style={{ background: "#062A2F", border: "1px solid #1B5C58", borderRadius: 10, padding: "12px 14px" }}>
+                    <div style={{ fontFamily: "'Gowun Batang', serif", fontSize: 16, color: "#EAFBF8" }}>{r.title}</div>
+                    {r.author && <div style={{ fontSize: 12, color: "#8FD4CC", marginTop: 2 }}>{r.author}</div>}
+                    {r.reason && <p style={{ fontSize: 12.5, color: "#B8E8E0", lineHeight: 1.6, marginTop: 8, marginBottom: 0 }}>{r.reason}</p>}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </>
+      )}
+
+      {dragBookId && (() => {
+        const draggedBook = activeBooks.find((b) => b.id === dragBookId);
+        if (!draggedBook) return null;
+        const c = spineColor(draggedBook.id);
+        return (
+          <div
+            style={{
+              position: "fixed",
+              left: dragPos.x - 29,
+              top: dragPos.y - 60,
+              width: 58,
+              height: 120,
+              background: c.bg,
+              borderRadius: "3px 3px 2px 2px",
+              boxShadow: "0 8px 24px rgba(0,0,0,0.5), 0 0 0 2px #2DD4C7",
+              zIndex: 80,
+              pointerEvents: "none",
+              display: "flex",
+              alignItems: "center",
+              justifyContent: "center",
+              padding: 6,
+              opacity: 0.95,
+              transform: "rotate(-3deg)",
+            }}
+          >
+            <div
+              style={{
+                writingMode: "vertical-rl",
+                textOrientation: "mixed",
+                fontFamily: "'Song Myung', serif",
+                fontWeight: 600,
+                fontSize: 11.5,
+                color: c.text,
+                whiteSpace: "nowrap",
+                overflow: "hidden",
+                maxHeight: 106,
+              }}
+            >
+              {draggedBook.title}
+            </div>
+          </div>
+        );
+      })()}
 
       {toast && (
         <div style={{ position: "fixed", bottom: 24, left: "50%", transform: "translateX(-50%)", background: "#0F4750", border: "1px solid #2DD4C7", color: "#EAFBF8", padding: "10px 20px", borderRadius: 24, fontSize: 13, zIndex: 60, animation: "fadeIn 0.2s ease" }}>

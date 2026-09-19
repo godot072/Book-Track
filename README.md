@@ -27,10 +27,19 @@ npm run dev
 2. [app.netlify.com/drop](https://app.netlify.com/drop)에 `dist` 폴더를 통째로 드래그.
 3. 단, 이 방법은 `netlify/functions`가 자동으로 같이 배포되지 않을 수 있어요. 사진 자동 인식 기능까지 쓰려면 **방법 A(GitHub 연동)**를 권장해요.
 
-## 사진 자동 인식 기능 켜기 (필수 설정)
+## AI 기능들 (모두 같은 API 키를 공유해요)
 
-이 기능은 `netlify/functions/recognize-cover.js`라는 서버리스 함수를 통해 동작해요.
-본인의 Anthropic API 키가 있어야 작동합니다.
+아래 기능은 전부 `netlify/functions/` 안의 서버리스 함수를 통해 동작하고,
+**같은** `ANTHROPIC_API_KEY` 환경변수 하나만 등록하면 전부 작동해요.
+
+| 기능 | 함수 파일 | 위치 |
+|---|---|---|
+| 표지 사진으로 자동 인식 | `recognize-cover.js` | 책 추가/수정 화면 |
+| 제목/저자만으로 자동 채우기 | `autofill-text.js` | 책 추가/수정 화면 |
+| 감상평 다듬기 | `polish-review.js` | 책 추가/수정 화면 |
+| 다음 읽을 책 추천 | `recommend-books.js` | 메인 화면 상단 "AI 추천" 버튼 |
+
+### API 키 등록 방법 (필수)
 
 1. [console.anthropic.com](https://console.anthropic.com)에서 API 키를 발급받으세요.
 2. Netlify 대시보드 → 사이트 선택 → **Site configuration → Environment variables**
