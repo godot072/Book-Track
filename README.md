@@ -35,7 +35,6 @@ npm run dev
 | 기능 | 함수 파일 | 위치 |
 |---|---|---|
 | 표지 사진으로 자동 인식 | `recognize-cover.js` | 책 추가/수정 화면 |
-| 제목/저자만으로 자동 채우기 | `autofill-text.js` | 책 추가/수정 화면 |
 | 감상평 다듬기 | `polish-review.js` | 책 추가/수정 화면 |
 | 다음 읽을 책 추천 | `recommend-books.js` | 메인 화면 상단 "AI 추천" 버튼 |
 

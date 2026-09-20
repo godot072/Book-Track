@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef } from "react";
 import { storage } from "./storage.js";
-import { Plus, X, Star, Search, Trash2, Pencil, Quote, BookOpen, Library, Copy, Clock, Share2, Sparkles } from "lucide-react";
+import { Plus, X, Star, Search, Trash2, Pencil, Quote, BookOpen, Library, Copy, Clock, Share2, Sparkles, Heart } from "lucide-react";
 
 const SPINE_COLORS = [
   { bg: "#0FA89C", text: "#EAFBF8" },
@@ -14,7 +14,7 @@ const SPINE_COLORS = [
 ];
 
 const STATUS = {
-  reading: { label: "읽는~중", color: "#FFB05C" },
+  reading: { label: "읽는~중", color: "#2FA8B0" },
   done: { label: "읽었~어", color: "#2DD4C7" },
   want: { label: "읽고~파", color: "#4A90D9" },
 };
@@ -106,13 +106,13 @@ export default function LibraryApp() {
   const [toast, setToast] = useState("");
   const skipSaveRef = useRef(true);
   const [coverRecognizing, setCoverRecognizing] = useState(false);
-  const coverInputRef = useRef(null);
+  const coverCameraInputRef = useRef(null);
+  const coverGalleryInputRef = useRef(null);
   const [dragBookId, setDragBookId] = useState(null);
   const [dragPos, setDragPos] = useState({ x: 0, y: 0 });
   const [dragOverStatus, setDragOverStatus] = useState(null);
   const dragRef = useRef(null); // { id, book, startX, startY, moved }
   const dragOverStatusRef = useRef(null);
-  const [textAutofilling, setTextAutofilling] = useState(false);
   const [reviewPolishing, setReviewPolishing] = useState(false);
   const [recommendOpen, setRecommendOpen] = useState(false);
   const [recommendLoading, setRecommendLoading] = useState(false);
@@ -266,38 +266,6 @@ export default function LibraryApp() {
     } finally {
       setCoverRecognizing(false);
       e.target.value = "";
-    }
-  }
-
-  async function handleAutofillText() {
-    if (!draft || !draft.title.trim()) {
-      showToast("책 제목을 먼저 입력해 주세요");
-      return;
-    }
-    setTextAutofilling(true);
-    try {
-      const response = await fetch("/.netlify/functions/autofill-text", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ title: draft.title, author: draft.author }),
-      });
-      const parsed = await response.json();
-      if (!response.ok) throw new Error(parsed.error || "autofill failed");
-      setDraft((d) => {
-        if (!d) return d;
-        return {
-          ...d,
-          author: parsed.author && parsed.author.trim() ? parsed.author.trim() : d.author,
-          authorBio: parsed.authorBio && parsed.authorBio.trim() ? parsed.authorBio.trim() : d.authorBio,
-          description: parsed.description && parsed.description.trim() ? parsed.description.trim() : d.description,
-          genre: parsed.genre && parsed.genre.trim() ? parsed.genre.trim() : d.genre,
-        };
-      });
-      showToast("제목/저자로 정보를 채웠어요");
-    } catch (err) {
-      showToast("자동 채우기에 실패했어요");
-    } finally {
-      setTextAutofilling(false);
     }
   }
 
@@ -459,7 +427,8 @@ export default function LibraryApp() {
         (b) => b.title.toLowerCase().includes(q) || b.author.toLowerCase().includes(q)
       );
     }
-    if (statusFilter !== "all") list = list.filter((b) => b.status === statusFilter);
+    if (statusFilter === "recommend") list = list.filter((b) => b.recommend);
+    else if (statusFilter !== "all") list = list.filter((b) => b.status === statusFilter);
     const sorters = {
       recent: (a, b) => b.dateAdded - a.dateAdded,
       title: (a, b) => a.title.localeCompare(b.title, "ko"),
@@ -471,6 +440,14 @@ export default function LibraryApp() {
   }, [activeBooks, query, statusFilter, sortBy]);
 
   const showFlat = query.trim() !== "" || statusFilter !== "all";
+
+  const flatShelfMeta = query.trim()
+    ? { label: "검색 결과", color: "#5C8CA8" }
+    : statusFilter === "recommend"
+    ? { label: "추천해", color: "#6FE8D8" }
+    : statusFilter !== "all"
+    ? { label: STATUS[statusFilter].label, color: STATUS[statusFilter].color }
+    : { label: "전체", color: "#5C8CA8" };
 
   const stats = useMemo(() => {
     const done = activeBooks.filter((b) => b.status === "done");
@@ -498,6 +475,8 @@ export default function LibraryApp() {
     const c = spineColor(book.id);
     const h = spineHeight(book.id);
     const isDragging = dragBookId === book.id;
+    const hasIcon = book.status === "done" || book.status === "reading";
+    const topPad = hasIcon ? 22 : 7;
     return (
       <div
         onPointerDown={(e) => startDrag(e, book)}
@@ -513,7 +492,10 @@ export default function LibraryApp() {
           touchAction: "none",
           userSelect: "none",
           position: "relative",
-          padding: "10px 4px 8px",
+          paddingTop: topPad,
+          paddingLeft: 3,
+          paddingRight: 3,
+          paddingBottom: 6,
           display: "flex",
           flexDirection: "column",
           alignItems: "center",
@@ -525,8 +507,8 @@ export default function LibraryApp() {
         }}
       >
         {book.status === "done" && (
-          <div style={{ position: "absolute", top: 6, left: "50%", transform: "translateX(-50%)" }}>
-            <Star size={11} fill="#EAFBF8" color="#EAFBF8" />
+          <div style={{ position: "absolute", top: 5, left: "50%", transform: "translateX(-50%)" }}>
+            <Star size={9} fill="#EAFBF8" color="#EAFBF8" />
           </div>
         )}
         {book.status === "reading" && (
@@ -534,10 +516,10 @@ export default function LibraryApp() {
             style={{
               position: "absolute",
               top: 0,
-              right: 6,
-              width: 10,
-              height: 22,
-              background: "#E88A3E",
+              right: 4,
+              width: 8,
+              height: 16,
+              background: "#2FA8B0",
               clipPath: "polygon(0 0, 100% 0, 100% 100%, 50% 78%, 0 100%)",
             }}
           />
@@ -548,10 +530,10 @@ export default function LibraryApp() {
             textOrientation: "mixed",
             fontFamily: "'Song Myung', serif",
             fontWeight: 600,
-            fontSize: 12.5,
+            fontSize: 11,
             color: c.text,
             letterSpacing: "0.02em",
-            maxHeight: h - 46,
+            maxHeight: h - topPad - 40,
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
@@ -564,12 +546,12 @@ export default function LibraryApp() {
           style={{
             writingMode: "vertical-rl",
             fontFamily: "'Gothic A1', sans-serif",
-            fontSize: 9.5,
+            fontSize: 8.5,
             color: c.text,
             opacity: 0.72,
             whiteSpace: "nowrap",
             overflow: "hidden",
-            maxHeight: 34,
+            maxHeight: 30,
             pointerEvents: "none",
           }}
         >
@@ -579,31 +561,37 @@ export default function LibraryApp() {
     );
   }
 
-  function Shelf({ label, list, statusKey }) {
+  function Shelf({ label, list, statusKey, color }) {
     const isEmpty = list.length === 0;
     const isDropTarget = !!statusKey;
     const isHovered = isDropTarget && dragOverStatus === statusKey;
+    const boxColor = isHovered ? STATUS[statusKey].color : color || "#8FD4CC";
     if (isEmpty && !(dragBookId && isDropTarget)) return null;
     return (
       <div style={{ marginBottom: 40 }}>
         <div
           style={{
             fontFamily: "'Space Mono', monospace",
-            fontSize: 11,
-            letterSpacing: "0.12em",
-            color: isHovered ? STATUS[statusKey].color : "#8FD4CC",
+            fontSize: 11.5,
+            fontWeight: 700,
+            letterSpacing: "0.1em",
+            color: boxColor,
+            background: `${boxColor}1A`,
+            border: `1px solid ${boxColor}55`,
+            borderRadius: 999,
+            padding: "6px 16px",
             marginBottom: 14,
-            paddingLeft: 2,
+            transition: "color 0.1s ease, border-color 0.1s ease",
           }}
         >
-          {label} · {list.length}권
+          {label} - {list.length}
         </div>
         <div
           data-shelf-status={isDropTarget ? statusKey : undefined}
           style={{
             display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(58px, 1fr))",
-            columnGap: 8,
+            gridTemplateColumns: "repeat(auto-fill, minmax(30px, 1fr))",
+            columnGap: 4,
             rowGap: 22,
             gridAutoRows: 210,
             minHeight: isEmpty ? 90 : undefined,
@@ -684,23 +672,32 @@ export default function LibraryApp() {
         .lib-btn-ghost:hover { border-color: #2DD4C7; color: #2DD4C7; }
         .scrollpanel::-webkit-scrollbar { width: 8px; }
         .scrollpanel::-webkit-scrollbar-thumb { background: #1B5C58; border-radius: 4px; }
+        .light-panel { color: #123B3A; }
+        .light-panel input::placeholder, .light-panel textarea::placeholder { color: #7FB3AD; }
+        .light-panel .lib-input {
+          background: #FFFFFF; border: 1px solid #BFE3DE; color: #123B3A;
+        }
+        .light-panel .lib-input:focus { border-color: #0EA99B; }
+        .light-panel .lib-btn-ghost {
+          background: #FFFFFF; color: #123B3A; border: 1px solid #BFE3DE;
+        }
+        .light-panel .lib-btn-ghost:hover { border-color: #0EA99B; color: #0EA99B; }
+        .light-panel .lib-btn-ghost:disabled { opacity: 0.6; cursor: default; }
       `}</style>
 
       {/* Header */}
       <div style={{ maxWidth: 980, margin: "0 auto", padding: "44px 24px 20px" }}>
-        <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between", flexWrap: "wrap", gap: 16 }}>
-          <div>
-            <div style={{ display: "flex", alignItems: "center", gap: 10, color: "#2DD4C7", fontSize: 12, letterSpacing: "0.18em", fontFamily: "'Space Mono', monospace", marginBottom: 6 }}>
-              <Library size={14} /> PRIVATE COLLECTION
-            </div>
-            <h1 style={{ fontFamily: "'Gowun Batang', serif", fontSize: 40, margin: 0, fontWeight: 700, letterSpacing: "-0.01em" }}>
-              Book Track
-            </h1>
-            <p style={{ color: "#EAFBF8", fontSize: 14, marginTop: 6 }}>
-              나의 소중한 책, 읽어온 흔적들 ...
-            </p>
-          </div>
-          <div style={{ display: "flex", gap: 8 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, color: "#2DD4C7", fontSize: 12, letterSpacing: "0.18em", fontFamily: "'Space Mono', monospace", marginBottom: 6 }}>
+          <Library size={14} /> PRIVATE COLLECTION
+        </div>
+        <h1 style={{ fontFamily: "'Gowun Batang', serif", fontSize: 40, margin: 0, fontWeight: 700, letterSpacing: "-0.01em" }}>
+          Book Track
+        </h1>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 12, marginTop: 6 }}>
+          <p style={{ color: "#EAFBF8", fontSize: 14, margin: 0 }}>
+            나의 소중한 책, 읽어온 흔적들 ...
+          </p>
+          <div style={{ display: "flex", gap: 8, marginLeft: "auto" }}>
             <button className="lib-btn-ghost" onClick={openRecommend} style={{ display: "flex", alignItems: "center", gap: 6 }}>
               <Sparkles size={15} /> AI 추천
             </button>
@@ -710,27 +707,45 @@ export default function LibraryApp() {
           </div>
         </div>
 
-        {/* stats */}
+        {/* stats (클릭하면 해당 책장으로 필터링) */}
         <div style={{ display: "flex", gap: 12, marginTop: 28, flexWrap: "wrap" }}>
           <div style={{ display: "flex", gap: 20, background: "#0F4750", border: "1px solid #1B5C58", borderRadius: 10, padding: "14px 20px", flex: "1 1 320px", boxShadow: "0 2px 10px rgba(58,42,33,0.06)" }}>
             {[
-              ["책장", stats.total, "#FF5C4D"],
-              ["읽는~중", stats.reading, "#FFB05C"],
-              ["읽었~어", stats.done, "#2DD4C7"],
-              ["읽고~파", stats.want, "#4A90D9"],
-              ["추천해", stats.recommend, "#F5C84C"],
-            ].map(([label, val, color], i) => (
-              <div key={label} style={{ textAlign: "center", ...(i === 4 ? { marginLeft: "auto" } : {}) }}>
-                <div style={{ fontSize: 11, fontWeight: 700, color }}>{label}</div>
-                <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 20, fontWeight: 700, color }}>{val}</div>
-              </div>
-            ))}
+              ["책장", stats.total, "#5C8CA8", "all"],
+              ["읽는~중", stats.reading, "#2FA8B0", "reading"],
+              ["읽었~어", stats.done, "#2DD4C7", "done"],
+              ["읽고~파", stats.want, "#4A90D9", "want"],
+              ["추천해", stats.recommend, "#6FE8D8", "recommend"],
+            ].map(([label, val, color, filterValue], i) => {
+              const isActive = statusFilter === filterValue && !query.trim();
+              return (
+                <button
+                  key={label}
+                  onClick={() => {
+                    setQuery("");
+                    setStatusFilter(filterValue);
+                  }}
+                  style={{
+                    textAlign: "center",
+                    background: "none",
+                    border: "none",
+                    cursor: "pointer",
+                    padding: 0,
+                    borderBottom: isActive ? `2px solid ${color}` : "2px solid transparent",
+                    ...(i === 4 ? { marginLeft: "auto" } : {}),
+                  }}
+                >
+                  <div style={{ fontSize: 11, fontWeight: 700, color }}>{label}</div>
+                  <div style={{ fontFamily: "'Space Mono', monospace", fontSize: 20, fontWeight: 700, color }}>{val}</div>
+                </button>
+              );
+            })}
           </div>
         </div>
 
-        {/* search/filter */}
-        <div style={{ display: "flex", gap: 10, marginTop: 22, flexWrap: "wrap", alignItems: "center" }}>
-          <div style={{ position: "relative", flex: "1 1 220px" }}>
+        {/* search */}
+        <div style={{ marginTop: 22 }}>
+          <div style={{ position: "relative" }}>
             <Search size={15} style={{ position: "absolute", left: 12, top: 11, color: "#8FD4CC" }} />
             <input
               className="lib-input"
@@ -740,24 +755,10 @@ export default function LibraryApp() {
               onChange={(e) => setQuery(e.target.value)}
             />
           </div>
-          <div style={{ display: "flex", gap: 6 }}>
-            {["all", "reading", "done", "want"].map((s) => {
-              const activeColor = s === "all" ? "#2DD4C7" : STATUS[s].color;
-              return (
-                <button
-                  key={s}
-                  onClick={() => setStatusFilter(s)}
-                  className="lib-btn-ghost"
-                  style={{
-                    borderColor: statusFilter === s ? activeColor : "#1B5C58",
-                    color: statusFilter === s ? activeColor : "#EAFBF8",
-                  }}
-                >
-                  {s === "all" ? "전체" : STATUS[s].label}
-                </button>
-              );
-            })}
-          </div>
+        </div>
+
+        {/* sort */}
+        <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 12 }}>
           <select className="lib-input" style={{ width: 150 }} value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
             <option value="recent">최근 추가순</option>
             <option value="title">제목순</option>
@@ -786,14 +787,14 @@ export default function LibraryApp() {
           filtered.length === 0 ? (
             <div style={{ textAlign: "center", padding: 60, color: "#8FD4CC" }}>일치하는 책이 없어요.</div>
           ) : (
-            <Shelf label="검색 결과" list={filtered} />
+            <Shelf label={flatShelfMeta.label} color={flatShelfMeta.color} list={filtered} />
           )
         ) : (
           <>
-            <Shelf label="전체" list={[...activeBooks].sort((a, b) => b.dateAdded - a.dateAdded)} />
-            <Shelf label="읽는~중" statusKey="reading" list={activeBooks.filter((b) => b.status === "reading").sort((a, b) => b.dateAdded - a.dateAdded)} />
-            <Shelf label="읽었~어" statusKey="done" list={activeBooks.filter((b) => b.status === "done").sort((a, b) => b.dateAdded - a.dateAdded)} />
-            <Shelf label="읽고~파" statusKey="want" list={activeBooks.filter((b) => b.status === "want").sort((a, b) => b.dateAdded - a.dateAdded)} />
+            <Shelf label="전체" color="#5C8CA8" list={[...activeBooks].sort((a, b) => b.dateAdded - a.dateAdded)} />
+            <Shelf label="읽는~중" statusKey="reading" color="#2FA8B0" list={activeBooks.filter((b) => b.status === "reading").sort((a, b) => b.dateAdded - a.dateAdded)} />
+            <Shelf label="읽었~어" statusKey="done" color="#2DD4C7" list={activeBooks.filter((b) => b.status === "done").sort((a, b) => b.dateAdded - a.dateAdded)} />
+            <Shelf label="읽고~파" statusKey="want" color="#4A90D9" list={activeBooks.filter((b) => b.status === "want").sort((a, b) => b.dateAdded - a.dateAdded)} />
           </>
         )}
       </div>
@@ -947,31 +948,33 @@ export default function LibraryApp() {
         <>
           <div onClick={() => setDraft(null)} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.55)", zIndex: 40, animation: "fadeIn 0.2s ease" }} />
           <div
-            className="scrollpanel"
+            className="scrollpanel light-panel"
             style={{
               position: "fixed", top: 0, right: 0, bottom: 0, width: "min(440px, 100vw)",
-              background: "#0F4750", zIndex: 41, overflowY: "auto", animation: "slideIn 0.25s ease",
-              borderLeft: "1px solid #1B5C58", padding: 26, boxShadow: "-8px 0 24px rgba(58,42,33,0.10)",
+              background: "#F2FBFA", zIndex: 41, overflowY: "auto", animation: "slideIn 0.25s ease",
+              borderLeft: "1px solid #BFE3DE", padding: 26, boxShadow: "-8px 0 24px rgba(18,59,58,0.14)",
             }}
           >
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
-              <h3 style={{ fontFamily: "'Gowun Batang', serif", fontSize: 20, margin: 0 }}>
+              <h3 style={{ fontFamily: "'Gowun Batang', serif", fontSize: 20, margin: 0, color: "#123B3A" }}>
                 {draft.id ? "책 정보 수정" : "새 책 추가"}
               </h3>
-              <button onClick={() => setDraft(null)} style={{ background: "none", border: "none", color: "#8FD4CC", cursor: "pointer" }}>
+              <button onClick={() => setDraft(null)} style={{ background: "none", border: "none", color: "#3F8F87", cursor: "pointer" }}>
                 <X size={18} />
               </button>
             </div>
 
-            <Field label="제목">
-              <input className="lib-input" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="책 제목" />
-            </Field>
-            <Field label="저자">
-              <input className="lib-input" value={draft.author} onChange={(e) => setDraft({ ...draft, author: e.target.value })} placeholder="지은이" />
-            </Field>
             <Field label="표지 사진">
               <input
-                ref={coverInputRef}
+                ref={coverCameraInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                style={{ display: "none" }}
+                onChange={handleCoverFile}
+              />
+              <input
+                ref={coverGalleryInputRef}
                 type="file"
                 accept="image/*"
                 style={{ display: "none" }}
@@ -981,32 +984,40 @@ export default function LibraryApp() {
                 {draft.cover ? (
                   <img src={draft.cover} alt="표지 미리보기" style={{ width: 52, height: 70, objectFit: "cover", borderRadius: 6, flexShrink: 0 }} />
                 ) : (
-                  <div style={{ width: 52, height: 70, borderRadius: 6, background: "#0A2E2C", border: "1px dashed #1B5C58", flexShrink: 0 }} />
+                  <div style={{ width: 52, height: 70, borderRadius: 6, background: "#E3F5F2", border: "1px dashed #BFE3DE", flexShrink: 0 }} />
                 )}
-                <div style={{ flex: 1 }}>
+                <div style={{ flex: 1, display: "flex", gap: 8 }}>
                   <button
                     type="button"
                     className="lib-btn-ghost"
-                    onClick={() => coverInputRef.current && coverInputRef.current.click()}
+                    onClick={() => coverCameraInputRef.current && coverCameraInputRef.current.click()}
                     disabled={coverRecognizing}
-                    style={{ width: "100%" }}
+                    style={{ flex: 1 }}
                   >
-                    {coverRecognizing ? "사진에서 정보 인식 중..." : "사진 업로드해서 자동 채우기"}
+                    {coverRecognizing ? "인식 중..." : "사진 찍기"}
                   </button>
-                  <input
-                    className="lib-input"
-                    style={{ marginTop: 8 }}
-                    value={draft.cover.startsWith("data:") ? "" : draft.cover}
-                    onChange={(e) => setDraft({ ...draft, cover: e.target.value })}
-                    placeholder="또는 표지 이미지 URL 직접 입력"
-                  />
+                  <button
+                    type="button"
+                    className="lib-btn-ghost"
+                    onClick={() => coverGalleryInputRef.current && coverGalleryInputRef.current.click()}
+                    disabled={coverRecognizing}
+                    style={{ flex: 1 }}
+                  >
+                    {coverRecognizing ? "인식 중..." : "사진 업로드"}
+                  </button>
                 </div>
               </div>
               {coverRecognizing && (
-                <p style={{ fontSize: 11.5, color: "#4A8C86", marginTop: 6, marginBottom: 0 }}>
+                <p style={{ fontSize: 11.5, color: "#3F8F87", marginTop: 6, marginBottom: 0 }}>
                   사진을 보고 제목·저자·소개·장르를 자동으로 채우고 있어요. 잠시만요.
                 </p>
               )}
+            </Field>
+            <Field label="제목">
+              <input className="lib-input" value={draft.title} onChange={(e) => setDraft({ ...draft, title: e.target.value })} placeholder="책 제목" />
+            </Field>
+            <Field label="저자">
+              <input className="lib-input" value={draft.author} onChange={(e) => setDraft({ ...draft, author: e.target.value })} placeholder="지은이" />
             </Field>
             <div style={{ display: "flex", gap: 10 }}>
               <div style={{ flex: 1 }}>
@@ -1024,15 +1035,6 @@ export default function LibraryApp() {
                 </Field>
               </div>
             </div>
-            <button
-              type="button"
-              onClick={handleAutofillText}
-              disabled={textAutofilling}
-              className="lib-btn-ghost"
-              style={{ width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 6, marginBottom: 14 }}
-            >
-              <Sparkles size={14} /> {textAutofilling ? "채우는 중..." : "제목/저자로 저자·도서 소개 자동 채우기"}
-            </button>
             <Field label="저자 소개">
               <textarea className="lib-input" rows={3} value={draft.authorBio} onChange={(e) => setDraft({ ...draft, authorBio: e.target.value })} placeholder="이 작가에 대한 간단한 소개" />
             </Field>
@@ -1040,12 +1042,12 @@ export default function LibraryApp() {
               <textarea className="lib-input" rows={3} value={draft.description} onChange={(e) => setDraft({ ...draft, description: e.target.value })} placeholder="이 책의 줄거리나 소개" />
             </Field>
             <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 6 }}>
-              <div style={{ fontSize: 12, color: "#8FD4CC" }}>감상평</div>
+              <div style={{ fontSize: 11, fontFamily: "'Space Mono', monospace", fontWeight: 700, letterSpacing: "0.06em", color: "#2E7D76" }}>감상평</div>
               <button
                 type="button"
                 onClick={handlePolishReview}
                 disabled={reviewPolishing}
-                style={{ background: "none", border: "none", color: "#2DD4C7", cursor: "pointer", fontSize: 11.5, display: "flex", alignItems: "center", gap: 4 }}
+                style={{ background: "none", border: "none", color: "#0EA99B", cursor: "pointer", fontSize: 11.5, display: "flex", alignItems: "center", gap: 4 }}
               >
                 <Sparkles size={12} /> {reviewPolishing ? "다듬는 중..." : "AI로 다듬기"}
               </button>
@@ -1055,60 +1057,32 @@ export default function LibraryApp() {
             </Field>
             <div style={{ display: "flex", gap: 10 }}>
               <div style={{ flex: 1 }}>
-                <Field label="읽기 시작일">
+                <Field label="읽기 시작한 날">
                   <input type="date" className="lib-input" value={draft.dateStarted} onChange={(e) => setDraft({ ...draft, dateStarted: e.target.value })} />
                 </Field>
               </div>
               <div style={{ flex: 1 }}>
-                <Field label="완독일">
+                <Field label="다 읽은 날">
                   <input type="date" className="lib-input" value={draft.dateFinished} onChange={(e) => setDraft({ ...draft, dateFinished: e.target.value })} />
                 </Field>
               </div>
             </div>
             {daysBetween(draft.dateStarted, draft.dateFinished) && (
-              <p style={{ fontSize: 12, color: "#8FD4CC", marginTop: -8, marginBottom: 14, display: "flex", alignItems: "center", gap: 5 }}>
+              <p style={{ fontSize: 12, color: "#3F8F87", marginTop: -8, marginBottom: 14, display: "flex", alignItems: "center", gap: 5 }}>
                 <Clock size={12} /> {daysBetween(draft.dateStarted, draft.dateFinished)}일 만에 완독하게 돼요
               </p>
             )}
-            <Field label="별점">
-              <div style={{ display: "flex", gap: 4 }}>
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <Star
-                    key={n}
-                    size={20}
-                    onClick={() => setDraft({ ...draft, rating: n === draft.rating ? 0 : n })}
-                    style={{ cursor: "pointer" }}
-                    color="#2DD4C7"
-                    fill={n <= draft.rating ? "#2DD4C7" : "none"}
-                  />
-                ))}
-              </div>
-            </Field>
 
-            <Field label="이 책, 추천해?">
+            <div style={{ display: "flex", justifyContent: "center", marginBottom: 14 }}>
               <button
                 type="button"
                 onClick={() => setDraft({ ...draft, recommend: !draft.recommend })}
-                style={{
-                  display: "flex",
-                  alignItems: "center",
-                  gap: 8,
-                  cursor: "pointer",
-                  background: draft.recommend ? "#F5C84C" : "transparent",
-                  color: draft.recommend ? "#141014" : "#8FD4CC",
-                  border: "1px solid #F5C84C",
-                  borderRadius: 999,
-                  padding: "9px 16px",
-                  fontSize: 13,
-                  fontWeight: 700,
-                }}
+                title="추천해"
+                style={{ background: "none", border: "none", cursor: "pointer", padding: 6 }}
               >
-                {draft.recommend ? "✓ 네, 추천해요" : "아직 아니에요"}
+                <Heart size={28} color="#F5C84C" fill={draft.recommend ? "#F5C84C" : "none"} />
               </button>
-              <p style={{ fontSize: 11, color: "#8FD4CC", marginTop: 6, marginBottom: 0 }}>
-                친구에게 추천하고 싶은 책만 골라서 "추천해" 목록에 모아둬요
-              </p>
-            </Field>
+            </div>
 
             <button className="lib-btn" style={{ width: "100%", marginTop: 10, padding: "11px 0" }} onClick={saveDraft}>
               {draft.id ? "수정 완료" : "서재에 꽂기"}
@@ -1262,7 +1236,18 @@ function SectionLabel({ children }) {
 function Field({ label, children }) {
   return (
     <div style={{ marginBottom: 14 }}>
-      <div style={{ fontSize: 12, color: "#8FD4CC", marginBottom: 6 }}>{label}</div>
+      <div
+        style={{
+          fontSize: 11,
+          fontFamily: "'Space Mono', monospace",
+          fontWeight: 700,
+          letterSpacing: "0.06em",
+          color: "#2E7D76",
+          marginBottom: 6,
+        }}
+      >
+        {label}
+      </div>
       {children}
     </div>
   );
